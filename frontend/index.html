@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Darukaa Biodiversity Intelligence</title>
+<style>
+  :root {
+    --bg: #0f1613; --panel: #16201c; --line: #24322c; --text: #e6efe9;
+    --muted: #8fa89c; --accent: #4fb286; --warn: #c9a227;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 18px 22px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 17px; letter-spacing: .2px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main { max-width: 900px; margin: 0 auto; padding: 20px; }
+  #log { display: flex; flex-direction: column; gap: 14px; min-height: 40vh; }
+  .msg { padding: 12px 15px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); }
+  .user { align-self: flex-end; max-width: 70%; background: #1d2b24; }
+  .bot { align-self: flex-start; max-width: 100%; }
+  .bot pre { white-space: pre-wrap; margin: 0; font: inherit; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .chip { cursor: pointer; font-size: 13px; padding: 6px 10px; border-radius: 999px;
+          border: 1px solid var(--line); background: #1a2621; color: var(--muted); }
+  .chip:hover { border-color: var(--accent); color: var(--text); }
+  .meta { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  .rec { border-left: 3px solid var(--accent); padding: 10px 0 10px 12px; margin-top: 12px; }
+  .rec h4 { margin: 0 0 4px; font-size: 14px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .tag { font-size: 11px; padding: 3px 8px; border-radius: 4px; background: #1f2d27; color: var(--muted); }
+  .tag.conf-high { color: var(--accent); }
+  .tag.conf-low { color: var(--warn); }
+  .src { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  form { display: flex; gap: 10px; margin-top: 20px; position: sticky; bottom: 0;
+         background: var(--bg); padding: 12px 0; }
+  input { flex: 1; padding: 12px 14px; border-radius: 9px; border: 1px solid var(--line);
+          background: var(--panel); color: var(--text); font: inherit; }
+  button { padding: 12px 20px; border-radius: 9px; border: 0; background: var(--accent);
+           color: #08120d; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Darukaa Biodiversity Intelligence</h1>
+  <p>Ask about a site. Every recommendation is retrieved from a sourced knowledge base, not generated freely.</p>
+</header>
+<main>
+  <div id="log"></div>
+  <form id="f">
+    <input id="q" autocomplete="off" placeholder="e.g. biodiversity is declining on my land" />
+    <button id="send">Send</button>
+  </form>
+</main>
+<script>
+const API = location.origin;
+let sessionId = null;
+const log = document.getElementById("log");
+
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function bubble(cls, html) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.innerHTML = html;
+  log.appendChild(d);
+  d.scrollIntoView({ behavior: "smooth", block: "end" });
+  return d;
+}
+
+function chips(el, questions) {
+  if (!questions || !questions.length) return;
+  const wrap = document.createElement("div");
+  wrap.className = "chips";
+  questions.forEach(q => {
+    const c = document.createElement("span");
+    c.className = "chip";
+    c.textContent = q;
+    c.onclick = () => { document.getElementById("q").focus(); };
+    wrap.appendChild(c);
+  });
+  el.appendChild(wrap);
+}
+
+function renderRecs(el, data) {
+  if (!data.recommendations.length) return;
+  if (data.diagnoses.length) {
+    const d = document.createElement("div");
+    d.innerHTML = "<strong>Diagnosis</strong>" + data.diagnoses
+      .map(x => `<div class="src">${esc(x.label)} — combines ${esc(x.variables.join(", "))}</div>`).join("");
+    el.appendChild(d);
+  }
+  data.recommendations.forEach(r => {
+    const box = document.createElement("div");
+    box.className = "rec";
+    const metrics = r.metrics.map(m =>
+      `<span class="tag">${esc(m.metric.replace(/_/g, " "))} ${m.direction === "increase" ? "↑" : "↓"}</span>`).join("");
+    box.innerHTML = `
+      <h4>${r.rank}. ${esc(r.action)}</h4>
+      <div>${esc(r.detail)}</div>
+      <div class="src"><strong>Why:</strong> ${esc(r.why_it_works)}</div>
+      <div class="tags">${metrics}
+        <span class="tag">${esc(r.horizon)} term</span>
+        <span class="tag conf-${esc(r.confidence_label)}">confidence ${esc(r.confidence_label)} (${r.confidence})</span>
+        <span class="tag">cost ${esc(r.cost)}</span>
+      </div>
+      <div class="src"><strong>Source:</strong> ${esc(r.evidence.source)} [${esc(r.evidence.kb_id)}]</div>`;
+    el.appendChild(box);
+  });
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = "Retrieved: " + data.retrieved_ids.slice(0, 8).join(", ") +
+    " · narration: " + data.narration_source;
+  el.appendChild(meta);
+}
+
+document.getElementById("f").onsubmit = async e => {
+  e.preventDefault();
+  const input = document.getElementById("q");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  bubble("user", esc(text));
+  const pending = bubble("bot", "<em>Retrieving…</em>");
+  try {
+    const res = await fetch(API + "/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, message: text })
+    });
+    const data = await res.json();
+    sessionId = data.session_id;
+    pending.innerHTML = "";
+    if (data.status === "needs_input") {
+      pending.innerHTML = `<div>${esc(data.reply)}</div>`;
+      chips(pending, data.questions);
+    } else {
+      renderRecs(pending, data);
+      chips(pending, data.questions);
+    }
+  } catch (err) {
+    pending.innerHTML = "<em>Request failed. Is the API running?</em>";
+  }
+};
+
+bubble("bot", "Tell me about a site. If you give fewer than three environmental variables I will ask for the missing ones before answering.");
+</script>
+</body>
+</html>
